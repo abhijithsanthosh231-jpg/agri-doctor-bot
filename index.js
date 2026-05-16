@@ -90,10 +90,7 @@ app.post('/webhook', async (req, res) => {
   }
 
   try {
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      systemInstruction: "നിങ്ങൾ ഒരു കാർഷിക വിദഗ്ദ്ധ ഡോക്ടറാണ്. കർഷകരുടെ ചോദ്യങ്ങൾക്ക് Malayalam ൽ ലളിതമായി ഉത്തരം പറയുക. Max 150 words. Practical advice only. ചിത്രമാണെങ്കിൽ: 1. രോഗത്തിന്റെ പേര് 2. കാരണം 3. ചികിത്സ (കൃത്യമായ കീടനാശിനി/മരുന്നിന്റെ പേരും അളവും) എന്നിവ പറയുക."
-    });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     let prompt;
     let imagePart = null;
