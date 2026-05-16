@@ -14,14 +14,15 @@ const genAI = new GoogleGenAI({
 });
 async function testGemini() {
   try {
-  const response = await genAI.models.generateContent({
-    model: "gemini-1.5-flash",
-    contents: "Hello"
-  });
+    const response = await genAI.models.generateContent({
+      model: "gemini-1.5-flash",
+      contents: "Hello"
+    });
 
-  console.log("TEST RESPONSE:", response.text);
-} catch (err) {
-  console.log("TEST ERROR:", JSON.stringify(err, null, 2));
+    console.log("TEST RESPONSE:", response.text);
+  } catch (err) {
+    console.log("TEST ERROR:", JSON.stringify(err, null, 2));
+  }
 }
 
 testGemini();
