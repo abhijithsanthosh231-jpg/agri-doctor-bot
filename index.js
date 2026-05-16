@@ -130,7 +130,7 @@ const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
     await sendWhatsAppReply(fromNumber, finalMessage);
 
   } catch (err) {
-    console.error('Error in /webhook:', err.stack || err.message || err);
+    console.error("FULL ERROR:", JSON.stringify(err, null, 2));
     if (err.response) {
       console.error('Axios Error Response Data:', err.response.data);
     }
