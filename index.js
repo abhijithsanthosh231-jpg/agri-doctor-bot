@@ -145,4 +145,7 @@ const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash', });
 });
 
 const PORT = process.env.PORT || 3000;
+
+console.log("API KEY EXISTS:", !!process.env.GEMINI_API_KEY);
+
 app.listen(PORT, () => console.log(`Agri Doctor bot running on port ${PORT}`));
