@@ -10,6 +10,19 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+async function testGemini() {
+  try {
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    const result = await model.generateContent("Hello");
+    
+    console.log("TEST RESPONSE:", result.response.text());
+  } catch (err) {
+    console.log("TEST ERROR:", JSON.stringify(err, null, 2));
+  }
+}
+
+testGemini();
 
 // ================================================
 // YOUR AD SYSTEM — edit these to add sponsors
