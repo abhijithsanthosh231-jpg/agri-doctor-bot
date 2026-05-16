@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const twilio = require('twilio');
+const { LRUCache } = require('lru-cache');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -20,7 +22,10 @@ const adsByCategory = {
 };
 
 // Track how many messages each farmer sends (for free limit)
-const farmerUsage = {};
+const farmerUsage = new LRUCache({
+  max: 5000, // keep max 5000 users in memory
+  ttl: 1000 * 60 * 60 * 24 * 30, // 30 days
+});
 const FREE_LIMIT = 10;
 
 function getAd(responseText) {
@@ -43,17 +48,38 @@ async function sendWhatsAppReply(to, message) {
 }
 
 app.post('/webhook', async (req, res) => {
-  res.status(200).send('OK'); // Reply to Twilio immediately
+  const twilioSignature = req.headers['x-twilio-signature'];
+  const url = `https://${req.get('host')}${req.originalUrl}`;
+
+  if (process.env.NODE_ENV === 'production') {
+    const isValid = twilio.validateRequest(
+      process.env.TWILIO_AUTH_TOKEN,
+      twilioSignature,
+      url,
+      req.body
+    );
+
+    if (!isValid) {
+      return res.status(403).send('Forbidden: Invalid Twilio Signature');
+    }
+  }
 
   const incomingMsg = req.body.Body || '';
   const fromNumber  = req.body.From;
   const mediaUrl    = req.body.MediaUrl0;
 
-  // Check free usage limit
-  if (!farmerUsage[fromNumber]) farmerUsage[fromNumber] = 0;
-  farmerUsage[fromNumber]++;
+  if (!fromNumber) {
+    return res.status(400).send('Bad Request: Missing From Number');
+  }
 
-  if (farmerUsage[fromNumber] > FREE_LIMIT) {
+  res.status(200).send('OK'); // Reply to Twilio immediately
+
+  // Check free usage limit
+  let currentUsage = farmerUsage.get(fromNumber) || 0;
+  currentUsage++;
+  farmerUsage.set(fromNumber, currentUsage);
+
+  if (currentUsage > FREE_LIMIT) {
     await sendWhatsAppReply(fromNumber,
       `നിങ്ങളുടെ ${FREE_LIMIT} സൗജന്യ ചോദ്യങ്ങൾ തീർന്നു.\n\n` +
       `അൺലിമിറ്റഡ് ഡയഗ്നോസിസിനായി ₹99/month സബ്സ്ക്രൈബ് ചെയ്യൂ:\n` +
@@ -79,15 +105,10 @@ app.post('/webhook', async (req, res) => {
       const mimeType = req.body.MediaContentType0 || 'image/jpeg';
 
       imagePart = { inlineData: { data: base64Image, mimeType } };
-      prompt = `നിങ്ങൾ ഒരു കാർഷിക വിദഗ്ദ്ധ ഡോക്ടറാണ്. ഈ ചിത്രത്തിലെ ചെടിയുടെ രോഗം തിരിച്ചറിഞ്ഞ് Malayalam ൽ ഹ്രസ്വമായി പറയൂ:
-1. രോഗത്തിന്റെ പേര്
-2. കാരണം  
-3. ചികിത്സ (കൃത്യമായ കീടനാശിനി/മരുന്നിന്റെ പേരും അളവും)
-Keep it simple for a farmer. Max 150 words.`;
+      prompt = `ഈ ചിത്രത്തിലെ ചെടിയുടെ രോഗം തിരിച്ചറിയുക. ഒപ്പം കർഷകൻ പറഞ്ഞത്: "${incomingMsg}"`;
     } else {
       // Text question
-      prompt = `നിങ്ങൾ ഒരു കാർഷിക വിദഗ്ദ്ധ ഡോക്ടറാണ്. ഒരു കർഷകൻ ചോദിക്കുന്നു: "${incomingMsg}"
-Malayalam ൽ ലളിതമായി ഉത്തരം പറയൂ. Max 150 words. Practical advice only.`;
+      prompt = incomingMsg;
     }
 
     const parts = imagePart ? [imagePart, { text: prompt }] : [{ text: prompt }];
@@ -104,13 +125,22 @@ Malayalam ൽ ലളിതമായി ഉത്തരം പറയൂ. Max 150 
       `\n\n━━━━━━━━━━━━━━\n` +
       ad +
       `\n━━━━━━━━━━━━━━\n` +
-      `_(${farmerUsage[fromNumber]}/${FREE_LIMIT} സൗജന്യ ചോദ്യങ്ങൾ ഉപയോഗിച്ചു)_`;
+      `_(${currentUsage}/${FREE_LIMIT} സൗജന്യ ചോദ്യങ്ങൾ ഉപയോഗിച്ചു)_`;
 
     await sendWhatsAppReply(fromNumber, finalMessage);
 
   } catch (err) {
-    console.error('Error:', err.message);
-    await sendWhatsAppReply(fromNumber, 'ക്ഷമിക്കണം, ഒരു നിമിഷം കഴിഞ്ഞ് വീണ്ടും ശ്രമിക്കൂ.');
+    console.error('Error in /webhook:', err.stack || err.message || err);
+    if (err.response) {
+      console.error('Axios Error Response Data:', err.response.data);
+    }
+    try {
+      if (fromNumber) {
+        await sendWhatsAppReply(fromNumber, 'ക്ഷമിക്കണം, ഒരു നിമിഷം കഴിഞ്ഞ് വീണ്ടും ശ്രമിക്കൂ.');
+      }
+    } catch (replyErr) {
+      console.error('Failed to send error reply:', replyErr.message);
+    }
   }
 });
 
