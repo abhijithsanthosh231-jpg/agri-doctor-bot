@@ -112,6 +112,7 @@ const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash', });
     }
 
     const parts = imagePart ? [imagePart, { text: prompt }] : [{ text: prompt }];
+    console.log("PARTS:", JSON.stringify(parts, null, 2));
     const result = await model.generateContent(parts);
     const aiReply = result.response.text();
 
