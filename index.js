@@ -90,7 +90,7 @@ app.post('/webhook', async (req, res) => {
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
 
     let prompt;
     let imagePart = null;
