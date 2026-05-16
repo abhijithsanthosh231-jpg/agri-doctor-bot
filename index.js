@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenAI } = require("@google/genai");
 const twilio = require('twilio');
 const { LRUCache } = require('lru-cache');
 
@@ -9,17 +9,19 @@ const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const genAI = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY
+});
 async function testGemini() {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const response = await genAI.models.generateContent({
+    model: "gemini-1.5-flash",
+    contents: "Hello"
+  });
 
-    const result = await model.generateContent("Hello");
-    
-    console.log("TEST RESPONSE:", result.response.text());
-  } catch (err) {
-    console.log("TEST ERROR:", JSON.stringify(err, null, 2));
-  }
+  console.log("TEST RESPONSE:", response.text);
+} catch (err) {
+  console.log("TEST ERROR:", JSON.stringify(err, null, 2));
 }
 
 testGemini();
