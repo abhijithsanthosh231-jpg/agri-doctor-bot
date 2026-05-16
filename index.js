@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenAI } = require('@google/genai');
 const twilio = require('twilio');
 const { LRUCache } = require('lru-cache');
 
@@ -9,7 +9,7 @@ const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // ================================================
 // YOUR AD SYSTEM — edit these to add sponsors
@@ -90,8 +90,6 @@ app.post('/webhook', async (req, res) => {
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-
     let prompt;
     let imagePart = null;
 
@@ -111,9 +109,15 @@ app.post('/webhook', async (req, res) => {
       prompt = incomingMsg;
     }
 
-    const parts = imagePart ? [imagePart, { text: prompt }] : [{ text: prompt }];
-    const result = await model.generateContent(parts);
-    const aiReply = result.response.text();
+    const contents = imagePart ? [imagePart, { text: prompt }] : prompt;
+    const result = await genAI.models.generateContent({
+      model: 'gemini-1.5-flash',
+      contents: contents,
+      config: {
+        systemInstruction: "നിങ്ങൾ ഒരു കാർഷിക വിദഗ്ദ്ധ ഡോക്ടറാണ്. കർഷകരുടെ ചോദ്യങ്ങൾക്ക് Malayalam ൽ ലളിതമായി ഉത്തരം പറയുക. Max 150 words. Practical advice only. ചിത്രമാണെങ്കിൽ: 1. രോഗത്തിന്റെ പേര് 2. കാരണം 3. ചികിത്സ (കൃത്യമായ കീടനാശിനി/മരുന്നിന്റെ പേരും അളവും) എന്നിവ പറയുക."
+      }
+    });
+    const aiReply = result.text;
 
     // Get relevant ad
     const ad = getAd(aiReply + incomingMsg);
