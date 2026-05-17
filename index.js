@@ -1,168 +1,89 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const { GoogleGenAI } = require("@google/genai");
-const twilio = require('twilio');
-const { LRUCache } = require('lru-cache');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
-const genAI = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY
-});
-async function testGemini() {
-  try {
-    const response = await genAI.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: "Hello"
-    });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-    console.log("TEST RESPONSE:", response.text);
-  } catch (err) {
-    console.log("TEST ERROR:", JSON.stringify(err, null, 2));
-  }
-}
-
-testGemini();
-
-// ================================================
-// YOUR AD SYSTEM — edit these to add sponsors
-// ================================================
 const adsByCategory = {
   fungal:  "🌿 *സ്പോൺസർ*: ആന്ത്രക്കോൾ കുമിൾനാശിനി — ശ്രീറാം അഗ്രോ, നേടുംകണ്ടം. വിളി: 9495000000",
-  pest:    "🐛 *സ്പോൺസർ*: കോറജൻ കീടനാശിനി — ഗ്രീൻ ലീഫ് അഗ്രോ, കുമളി. 20% ഓഫ്. വിളി: 9446000000",
-  nutrient:"🌱 *സ്പോൺസർ*: NPK വളം — അഗ്രി പ്ലസ്, നേടുംകണ്ടം. ഡോർ ഡെലിവറി. വിളി: 9847000000",
-  default: "🌾 *സ്പോൺസർ*: ഉയർന്ന നിലവാരമുള്ള വിത്തുകളും വളങ്ങളും — അഗ്രി പ്ലസ്, നേടുംകണ്ടം. വിളി: 9847000000"
+  pest:    "🐛 *സ്പോൺസർ*: കോറജൻ കീടനാശിനി — ഗ്രീൻ ലീഫ് അഗ്രോ, കുമളി. വിളി: 9446000000",
+  nutrient:"🌱 *സ്പോൺസർ*: NPK വളം — അഗ്രി പ്ലസ്, നേടുംകണ്ടം. വിളി: 9847000000",
+  default: "🌾 *സ്പോൺസർ*: വിത്തും വളവും — അഗ്രി പ്ലസ്, നേടുംകണ്ടം. വിളി: 9847000000"
 };
 
-// Track how many messages each farmer sends (for free limit)
-const farmerUsage = new LRUCache({
-  max: 5000, // keep max 5000 users in memory
-  ttl: 1000 * 60 * 60 * 24 * 30, // 30 days
-});
+const farmerUsage = {};
 const FREE_LIMIT = 10;
 
-function getAd(responseText) {
-  const text = responseText.toLowerCase();
-  if (text.includes('fungal') || text.includes('blight') || text.includes('rot') || text.includes('കുമിൾ')) 
-    return adsByCategory.fungal;
-  if (text.includes('pest') || text.includes('insect') || text.includes('worm') || text.includes('കീട'))
-    return adsByCategory.pest;
-  if (text.includes('yellow') || text.includes('deficiency') || text.includes('nutrient') || text.includes('വളം'))
-    return adsByCategory.nutrient;
+function getAd(text) {
+  const t = text.toLowerCase();
+  if (t.includes('fungal') || t.includes('blight') || t.includes('rot') || t.includes('കുമിൾ')) return adsByCategory.fungal;
+  if (t.includes('pest') || t.includes('insect') || t.includes('worm') || t.includes('കീട')) return adsByCategory.pest;
+  if (t.includes('yellow') || t.includes('deficiency') || t.includes('വളം')) return adsByCategory.nutrient;
   return adsByCategory.default;
 }
 
-async function sendWhatsAppReply(to, message) {
-  const url = `https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Messages.json`;
-  await axios.post(url,
+async function sendReply(to, message) {
+  await axios.post(
+    `https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Messages.json`,
     new URLSearchParams({ From: process.env.TWILIO_WHATSAPP_FROM, To: to, Body: message }),
-    { auth: { username: process.env.TWILIO_ACCOUNT_SID, password: process.env.TWILIO_AUTH_TOKEN }}
+    { auth: { username: process.env.TWILIO_ACCOUNT_SID, password: process.env.TWILIO_AUTH_TOKEN } }
   );
 }
 
 app.post('/webhook', async (req, res) => {
-  const twilioSignature = req.headers['x-twilio-signature'];
-  const url = `https://${req.get('host')}${req.originalUrl}`;
+  res.status(200).send('OK');
 
-  if (process.env.NODE_ENV === 'production') {
-    const isValid = twilio.validateRequest(
-      process.env.TWILIO_AUTH_TOKEN,
-      twilioSignature,
-      url,
-      req.body
-    );
+  const msg   = req.body.Body || '';
+  const from  = req.body.From;
+  const media = req.body.MediaUrl0;
 
-    if (!isValid) {
-      return res.status(403).send('Forbidden: Invalid Twilio Signature');
-    }
-  }
+  if (!from) return;
 
-  const incomingMsg = req.body.Body || '';
-  const fromNumber  = req.body.From;
-  const mediaUrl    = req.body.MediaUrl0;
+  farmerUsage[from] = (farmerUsage[from] || 0) + 1;
+  const usage = farmerUsage[from];
 
-  if (!fromNumber) {
-    return res.status(400).send('Bad Request: Missing From Number');
-  }
-
-  res.status(200).send('OK'); // Reply to Twilio immediately
-
-  // Check free usage limit
-  let currentUsage = farmerUsage.get(fromNumber) || 0;
-  currentUsage++;
-  farmerUsage.set(fromNumber, currentUsage);
-
-  if (currentUsage > FREE_LIMIT) {
-    await sendWhatsAppReply(fromNumber,
+  if (usage > FREE_LIMIT) {
+    await sendReply(from,
       `നിങ്ങളുടെ ${FREE_LIMIT} സൗജന്യ ചോദ്യങ്ങൾ തീർന്നു.\n\n` +
-      `അൺലിമിറ്റഡ് ഡയഗ്നോസിസിനായി ₹99/month സബ്സ്ക്രൈബ് ചെയ്യൂ:\n` +
-      `https://rzp.io/l/agri-doctor\n\n` +
-      `📞 സഹായത്തിന്: 9447000000`
+      `അൺലിമിറ്റഡ് ഡയഗ്നോസിസിനായി ₹99/month:\nhttps://rzp.io/l/agri-doctor`
     );
     return;
   }
 
   try {
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash', });
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    let parts = [];
 
-    let prompt;
-    let imagePart = null;
-
-    if (mediaUrl) {
-      // Farmer sent a photo
-      const imageResponse = await axios.get(mediaUrl, {
+    if (media) {
+      const imgRes = await axios.get(media, {
         responseType: 'arraybuffer',
         auth: { username: process.env.TWILIO_ACCOUNT_SID, password: process.env.TWILIO_AUTH_TOKEN }
       });
-      const base64Image = Buffer.from(imageResponse.data).toString('base64');
-      const mimeType = req.body.MediaContentType0 || 'image/jpeg';
-
-      imagePart = { inlineData: { data: base64Image, mimeType } };
-      prompt = `ഈ ചിത്രത്തിലെ ചെടിയുടെ രോഗം തിരിച്ചറിയുക. ഒപ്പം കർഷകൻ പറഞ്ഞത്: "${incomingMsg}"`;
+      parts.push({ inlineData: { data: Buffer.from(imgRes.data).toString('base64'), mimeType: req.body.MediaContentType0 || 'image/jpeg' } });
+      parts.push({ text: `നിങ്ങൾ ഒരു കാർഷിക വിദഗ്ദ്ധ ഡോക്ടറാണ്. ഈ ചിത്രത്തിലെ ചെടിയുടെ രോഗം Malayalam ൽ പറയൂ:\n1. രോഗത്തിന്റെ പേര്\n2. കാരണം\n3. ചികിത്സ\nMax 150 words.` });
     } else {
-      // Text question
-      prompt = incomingMsg;
+      parts.push({ text: `നിങ്ങൾ ഒരു കാർഷിക വിദഗ്ദ്ധ ഡോക്ടറാണ്. കർഷകൻ ചോദിക്കുന്നു: "${msg}"\nMalayalam ൽ ലളിതമായി ഉത്തരം പറയൂ. Max 150 words.` });
     }
 
-    const parts = imagePart ? [imagePart, { text: prompt }] : [{ text: prompt }];
-    console.log("PARTS:", JSON.stringify(parts, null, 2));
-    const result = await model.generateContent(parts);
+    const result  = await model.generateContent(parts);
     const aiReply = result.response.text();
+    const ad      = getAd(aiReply + msg);
 
-    // Get relevant ad
-    const ad = getAd(aiReply + incomingMsg);
-
-    // Build final message
-    const finalMessage =
-      `🌿 *അഗ്രി ഡോക്ടർ*\n\n` +
-      aiReply +
-      `\n\n━━━━━━━━━━━━━━\n` +
-      ad +
-      `\n━━━━━━━━━━━━━━\n` +
-      `_(${currentUsage}/${FREE_LIMIT} സൗജന്യ ചോദ്യങ്ങൾ ഉപയോഗിച്ചു)_`;
-
-    await sendWhatsAppReply(fromNumber, finalMessage);
+    await sendReply(from,
+      `🌿 *അഗ്രി ഡോക്ടർ*\n\n${aiReply}\n\n` +
+      `━━━━━━━━━━━━\n${ad}\n━━━━━━━━━━━━\n` +
+      `_(${usage}/${FREE_LIMIT} സൗജന്യ ചോദ്യങ്ങൾ)_`
+    );
 
   } catch (err) {
-    console.error("FULL ERROR:", JSON.stringify(err, null, 2));
-    if (err.response) {
-      console.error('Axios Error Response Data:', err.response.data);
-    }
-    try {
-      if (fromNumber) {
-        await sendWhatsAppReply(fromNumber, 'ക്ഷമിക്കണം, ഒരു നിമിഷം കഴിഞ്ഞ് വീണ്ടും ശ്രമിക്കൂ.');
-      }
-    } catch (replyErr) {
-      console.error('Failed to send error reply:', replyErr.message);
-    }
+    console.error('Error:', err.message);
+    await sendReply(from, 'ക്ഷമിക്കണം, വീണ്ടും ശ്രമിക്കൂ.');
   }
 });
 
-const PORT = process.env.PORT || 3000;
-
-console.log("API KEY EXISTS:", !!process.env.GEMINI_API_KEY);
-
-app.listen(PORT, () => console.log(`Agri Doctor bot running on port ${PORT}`));
+app.listen(process.env.PORT || 3000, () => console.log('Agri Doctor bot running!'));
