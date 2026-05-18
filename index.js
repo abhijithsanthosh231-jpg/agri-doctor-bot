@@ -86,9 +86,18 @@ Max 150 words.`;
       `_(${usage}/${FREE_LIMIT} സൗജന്യ ചോദ്യങ്ങൾ)_`
     );
 
-  } catch (err) {
-    console.error('Error:', err.message);
-    await sendReply(from, 'ക്ഷമിക്കണം, വീണ്ടും ശ്രമിക്കൂ.');
+ } catch (err) {
+    console.error('FULL ERROR:', err.message);
+    if (err.response) {
+      console.error('STATUS:', err.response.status);
+      console.error('DATA:', JSON.stringify(err.response.data));
+    }
+    try {
+      await sendReply(from, 'ക്ഷമിക്കണം, വീണ്ടും ശ്രമിക്കൂ.');
+    } catch(e) {
+      console.error('REPLY ERROR:', e.message);
+      if (e.response) console.error('REPLY DATA:', JSON.stringify(e.response.data));
+    }
   }
 });
 
