@@ -1,13 +1,10 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const adsByCategory = {
   fungal:  "🌿 *സ്പോൺസർ*: ആന്ത്രക്കോൾ കുമിൾനാശിനി — ശ്രീറാം അഗ്രോ, നേടുംകണ്ടം. വിളി: 9495000000",
@@ -27,6 +24,24 @@ function getAd(text) {
   return adsByCategory.default;
 }
 
+async function askGroq(prompt) {
+  const response = await axios.post(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      model: 'llama3-8b-8192',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 300
+    },
+    {
+      headers: {
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    }
+  );
+  return response.data.choices[0].message.content;
+}
+
 async function sendReply(to, message) {
   await axios.post(
     `https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Messages.json`,
@@ -38,9 +53,8 @@ async function sendReply(to, message) {
 app.post('/webhook', async (req, res) => {
   res.status(200).send('OK');
 
-  const msg   = req.body.Body || '';
-  const from  = req.body.From;
-  const media = req.body.MediaUrl0;
+  const msg  = req.body.Body || '';
+  const from = req.body.From;
 
   if (!from) return;
 
@@ -56,23 +70,15 @@ app.post('/webhook', async (req, res) => {
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-    let parts = [];
+    const prompt = `നിങ്ങൾ ഒരു കാർഷിക വിദഗ്ദ്ധ ഡോക്ടറാണ്. കർഷകൻ ചോദിക്കുന്നു: "${msg}"
+Malayalam ൽ ലളിതമായി ഉത്തരം പറയൂ:
+1. പ്രശ്നത്തിന്റെ പേര്
+2. കാരണം
+3. ചികിത്സ (കൃത്യമായ മരുന്നും അളവും)
+Max 150 words.`;
 
-    if (media) {
-      const imgRes = await axios.get(media, {
-        responseType: 'arraybuffer',
-        auth: { username: process.env.TWILIO_ACCOUNT_SID, password: process.env.TWILIO_AUTH_TOKEN }
-      });
-      parts.push({ inlineData: { data: Buffer.from(imgRes.data).toString('base64'), mimeType: req.body.MediaContentType0 || 'image/jpeg' } });
-      parts.push({ text: `നിങ്ങൾ ഒരു കാർഷിക വിദഗ്ദ്ധ ഡോക്ടറാണ്. ഈ ചിത്രത്തിലെ ചെടിയുടെ രോഗം Malayalam ൽ പറയൂ:\n1. രോഗത്തിന്റെ പേര്\n2. കാരണം\n3. ചികിത്സ\nMax 150 words.` });
-    } else {
-      parts.push({ text: `നിങ്ങൾ ഒരു കാർഷിക വിദഗ്ദ്ധ ഡോക്ടറാണ്. കർഷകൻ ചോദിക്കുന്നു: "${msg}"\nMalayalam ൽ ലളിതമായി ഉത്തരം പറയൂ. Max 150 words.` });
-    }
-
-    const result  = await model.generateContent(parts);
-    const aiReply = result.response.text();
-    const ad      = getAd(aiReply + msg);
+    const aiReply = await askGroq(prompt);
+    const ad = getAd(aiReply + msg);
 
     await sendReply(from,
       `🌿 *അഗ്രി ഡോക്ടർ*\n\n${aiReply}\n\n` +
